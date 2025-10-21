@@ -275,7 +275,70 @@ func downloads(router *httprouter.Router, baseDir string, fsys fs.FS) {
 	})
 }
 
-func Serve(ctx context.Context, artifactPath string, addr string, port string) context.CancelFunc {
+func oidcRoutes(router *httprouter.Router, keyManager common.OIDCKeyManager) {
+	// POST /token - Issue OIDC ID tokens
+	router.POST("/token", func(w http.ResponseWriter, req *http.Request, _ httprouter.Params) {
+		// Get bearer token from Authorization header
+		authHeader := req.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "unauthorized: missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		// Parse the request token to get GitHub context
+		parts := strings.SplitN(authHeader, " ", 2)
+		if len(parts) != 2 || parts[0] != "Bearer" {
+			http.Error(w, "unauthorized: invalid Authorization header format", http.StatusUnauthorized)
+			return
+		}
+
+		ctx, err := common.ParseOIDCRequestToken(parts[1])
+		if err != nil {
+			http.Error(w, fmt.Sprintf("unauthorized: %v", err), http.StatusUnauthorized)
+			return
+		}
+
+		// Get audience from query parameter
+		audience := req.URL.Query().Get("audience")
+		if audience == "" {
+			audience = "https://github.com/" + ctx.RepositoryOwner
+		}
+
+		// Generate OIDC ID token
+		idToken, err := common.GenerateOIDCToken(keyManager, ctx, audience)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error generating token: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		// Return GitHub-style response
+		response := map[string]interface{}{
+			"count": 1,
+			"value": idToken,
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(response); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+
+	// GET /.well-known/jwks - Publish public keys
+	router.GET("/.well-known/jwks", func(w http.ResponseWriter, _ *http.Request, _ httprouter.Params) {
+		jwks, err := common.GenerateJWKS(keyManager)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("error generating JWKS: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write(jwks); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+	})
+}
+
+func Serve(ctx context.Context, artifactPath string, addr string, port string, keyManager common.OIDCKeyManager) context.CancelFunc {
 	serverContext, cancel := context.WithCancel(ctx)
 	logger := common.Logger(serverContext)
 
@@ -290,6 +353,12 @@ func Serve(ctx context.Context, artifactPath string, addr string, port string) c
 	uploads(router, artifactPath, fsys)
 	downloads(router, artifactPath, fsys)
 	RoutesV4(router, artifactPath, fsys, fsys)
+
+	// Add OIDC routes if keyManager is provided
+	if keyManager != nil {
+		oidcRoutes(router, keyManager)
+		logger.Info("OIDC token endpoints enabled")
+	}
 
 	server := &http.Server{
 		Addr:              fmt.Sprintf("%s:%s", addr, port),

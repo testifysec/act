@@ -1091,6 +1091,42 @@ func setActionRuntimeVars(rc *RunContext, env map[string]string) {
 		actionsRuntimeToken, _ = common.CreateAuthorizationToken(runID, runID, runID)
 	}
 	env["ACTIONS_RUNTIME_TOKEN"] = actionsRuntimeToken
+
+	// Set OIDC token environment variables
+	idTokenRequestURL := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_URL")
+	if idTokenRequestURL == "" {
+		idTokenRequestURL = fmt.Sprintf("http://%s:%s/token", rc.Config.ArtifactServerAddr, rc.Config.ArtifactServerPort)
+	}
+	env["ACTIONS_ID_TOKEN_REQUEST_URL"] = idTokenRequestURL
+
+	idTokenRequestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+	if idTokenRequestToken == "" {
+		// Extract workflow file name from the Run
+		workflowFile := filepath.Base(rc.Run.Workflow.File)
+
+		// Create GitHub context for OIDC token
+		ghCtx := &common.GitHubContext{
+			Repository:      env["GITHUB_REPOSITORY"],
+			RepositoryOwner: env["GITHUB_REPOSITORY_OWNER"],
+			Workflow:        env["GITHUB_WORKFLOW"],
+			WorkflowFile:    workflowFile,
+			Ref:             env["GITHUB_REF"],
+			Sha:             env["GITHUB_SHA"],
+			Actor:           env["GITHUB_ACTOR"],
+			RunID:           env["GITHUB_RUN_ID"],
+			RunNumber:       env["GITHUB_RUN_NUMBER"],
+			RunAttempt:      env["GITHUB_RUN_ATTEMPT"],
+			EventName:       env["GITHUB_EVENT_NAME"],
+			RefName:         env["GITHUB_REF_NAME"],
+			RefType:         env["GITHUB_REF_TYPE"],
+			BaseRef:         env["GITHUB_BASE_REF"],
+			HeadRef:         env["GITHUB_HEAD_REF"],
+			Job:             env["GITHUB_JOB"],
+		}
+
+		idTokenRequestToken, _ = common.CreateOIDCRequestToken(ghCtx)
+	}
+	env["ACTIONS_ID_TOKEN_REQUEST_TOKEN"] = idTokenRequestToken
 }
 
 func (rc *RunContext) handleCredentials(ctx context.Context) (string, string, error) {

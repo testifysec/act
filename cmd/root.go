@@ -676,7 +676,13 @@ func newRunCommand(ctx context.Context, input *Input) func(*cobra.Command, []str
 			return err
 		}
 
-		cancel := artifacts.Serve(ctx, input.artifactServerPath, input.artifactServerAddr, input.artifactServerPort)
+		// Create OIDC key manager for ID token support
+		oidcKeyManager, err := common.NewOIDCKeyManager()
+		if err != nil {
+			return fmt.Errorf("failed to create OIDC key manager: %w", err)
+		}
+
+		cancel := artifacts.Serve(ctx, input.artifactServerPath, input.artifactServerAddr, input.artifactServerPort, oidcKeyManager)
 
 		const cacheURLKey = "ACTIONS_CACHE_URL"
 		var cacheHandler *artifactcache.Handler
