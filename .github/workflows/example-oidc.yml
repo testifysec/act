@@ -1,0 +1,49 @@
+name: Test OIDC
+on: push
+jobs:
+  test-oidc:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Test OIDC Token Request
+        run: |
+          echo "Testing OIDC token functionality"
+          echo "ACTIONS_ID_TOKEN_REQUEST_URL: $ACTIONS_ID_TOKEN_REQUEST_URL"
+          echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:0:20}..."
+
+          # Install curl if not available
+          if ! command -v curl &> /dev/null; then
+            echo "Installing curl..."
+            apt-get update -qq && apt-get install -y -qq curl jq > /dev/null 2>&1
+          fi
+
+          # Request OIDC token
+          if [ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && [ -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN" ]; then
+            echo "Requesting OIDC token..."
+            RESPONSE=$(curl -s -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"aud":"sigstore"}' \
+              "$ACTIONS_ID_TOKEN_REQUEST_URL")
+
+            if echo "$RESPONSE" | grep -q "value"; then
+              echo "✅ Successfully obtained OIDC token"
+              TOKEN=$(echo "$RESPONSE" | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+
+              # Decode and display token claims
+              PAYLOAD=$(echo "$TOKEN" | cut -d'.' -f2)
+              # Add padding if needed
+              PADDED=$(printf '%s' "$PAYLOAD"; printf '=%.0s' {1..2})
+              echo "Token claims:"
+              echo "$PADDED" | base64 -d 2>/dev/null | jq . || echo "Could not decode token"
+
+              echo "✅ OIDC integration test passed!"
+            else
+              echo "❌ Failed to obtain OIDC token"
+              echo "Response: $RESPONSE"
+              exit 1
+            fi
+          else
+            echo "❌ OIDC environment variables not set"
+            exit 1
+          fi
