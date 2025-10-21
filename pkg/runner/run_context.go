@@ -1102,7 +1102,10 @@ func setActionRuntimeVars(rc *RunContext, env map[string]string) {
 	idTokenRequestToken := os.Getenv("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
 	if idTokenRequestToken == "" {
 		// Extract workflow file name from the Run
-		workflowFile := filepath.Base(rc.Run.Workflow.File)
+		var workflowFile string
+		if rc.Run != nil && rc.Run.Workflow != nil {
+			workflowFile = filepath.Base(rc.Run.Workflow.File)
+		}
 
 		// Create GitHub context for OIDC token
 		ghCtx := &common.GitHubContext{
